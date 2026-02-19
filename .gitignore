@@ -1,0 +1,31 @@
+# Binaries & builds
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Env & secrets
+.env
+.env.local
+.env.*.local
+
+# Logs & temp
+*.log
+tmp/
+temp/
+
+# Test coverage
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Go
+/vendor/

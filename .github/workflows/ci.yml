@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: messenger_test
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/messenger_test?sslmode=disable
+      JWT_SECRET: testsecret
+      OTP_SALT: testsalt
+      OTP_DEV_MODE: "true"
+      PORT: "8080"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+
+      - name: Go mod download
+        working-directory: server
+        run: go mod download
+
+      - name: Go vet
+        working-directory: server
+        run: go vet ./...
+
+      - name: Unit tests
+        working-directory: server
+        run: go test ./... -v -count=1
+
+      - name: Integration tests
+        working-directory: server
+        run: go test ./internal/tests/... -v -run TestAuthIntegration
