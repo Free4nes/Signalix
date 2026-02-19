@@ -15,14 +15,17 @@ const (
 	MigrationDir = "internal/db/migrations"
 	// MigrationDirFromRepoRoot is used when tests run from repo root.
 	MigrationDirFromRepoRoot = "server/internal/db/migrations"
+	// MigrationDirFromInternalTests is used when go test ./... runs tests from server/internal/tests.
+	MigrationDirFromInternalTests = "../../internal/db/migrations"
 )
 
 // ResolveMigrationDir returns the first existing directory of:
-//   - internal/db/migrations
-//   - server/internal/db/migrations
-// Returns empty string if neither exists.
+//   - internal/db/migrations (CWD=server/)
+//   - server/internal/db/migrations (CWD=repo root)
+//   - ../../internal/db/migrations (CWD=server/internal/tests, e.g. go test ./...)
+// Returns empty string if none exists.
 func ResolveMigrationDir() string {
-	for _, dir := range []string{MigrationDir, MigrationDirFromRepoRoot} {
+	for _, dir := range []string{MigrationDir, MigrationDirFromRepoRoot, MigrationDirFromInternalTests} {
 		if info, err := os.Stat(dir); err == nil && info.IsDir() {
 			abs, _ := filepath.Abs(dir)
 			return abs
@@ -38,7 +41,7 @@ func RunMigrations(db *sql.DB) error {
 	}
 	dir := ResolveMigrationDir()
 	if dir == "" {
-		return fmt.Errorf("migrations directory not found (tried %q and %q); run tests from server/ or repo root", MigrationDir, MigrationDirFromRepoRoot)
+		return fmt.Errorf("migrations directory not found (tried %q, %q, %q); run tests from server/ or repo root", MigrationDir, MigrationDirFromRepoRoot, MigrationDirFromInternalTests)
 	}
 	if err := goose.Up(db, dir); err != nil {
 		return fmt.Errorf("goose up: %w", err)
