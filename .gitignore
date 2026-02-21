@@ -7,6 +7,8 @@ dist/
 *.dylib
 
 # Env & secrets
+*.token
+*.secret
 .env
 .env.local
 .env.*.local
