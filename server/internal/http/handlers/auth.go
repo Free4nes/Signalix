@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -57,9 +58,10 @@ type verifyOTPRequest struct {
 
 // verifyOTPResponse is the JSON response for verify_otp
 type verifyOTPResponse struct {
-	AccessToken string       `json:"access_token"`
-	TokenType   string       `json:"token_type"`
-	User        userResponse `json:"user"`
+	AccessToken  string       `json:"access_token"`
+	RefreshToken string       `json:"refresh_token"`
+	TokenType    string       `json:"token_type"`
+	User         userResponse `json:"user"`
 }
 
 // userResponse is the user object in API responses
@@ -151,7 +153,7 @@ func (h *AuthHandler) HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 
 	ip := getClientIP(r)
 
-	user, accessToken, err := h.authService.VerifyOTPAndIssueAccessToken(r.Context(), req.PhoneNumber, req.OTP, ip)
+	user, accessToken, refreshToken, err := h.authService.VerifyOTPAndIssueAccessToken(r.Context(), req.PhoneNumber, req.OTP, ip)
 	if err != nil {
 		logMaskedPhone(req.PhoneNumber, "OTP verification failed", err)
 		respondWithError(w, http.StatusUnauthorized, "invalid or expired OTP")
@@ -159,8 +161,9 @@ func (h *AuthHandler) HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := verifyOTPResponse{
-		AccessToken: accessToken,
-		TokenType:   "bearer",
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		TokenType:    "bearer",
 		User: userResponse{
 			ID:          user.ID.String(),
 			PhoneNumber: user.PhoneNumber,
@@ -172,6 +175,83 @@ func (h *AuthHandler) HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		logMaskedPhone(req.PhoneNumber, "Failed to encode response", err)
 	}
+}
+
+// refreshRequest is the request body for POST /auth/refresh
+type refreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+// refreshResponse is the JSON response for refresh
+type refreshResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	TokenType    string `json:"token_type"`
+}
+
+// HandleRefresh handles POST /auth/refresh
+func (h *AuthHandler) HandleRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req refreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.RefreshToken = strings.TrimSpace(req.RefreshToken)
+	if req.RefreshToken == "" {
+		respondWithError(w, http.StatusBadRequest, "refresh_token is required")
+		return
+	}
+	accessToken, refreshToken, err := h.authService.RefreshTokens(r.Context(), req.RefreshToken)
+	if err != nil {
+		if errors.Is(err, auth.ErrRefreshTokenReuseDetected) {
+			respondWithError(w, http.StatusUnauthorized, "refresh_token_reuse_detected")
+			return
+		}
+		respondWithError(w, http.StatusUnauthorized, "invalid or expired refresh token")
+		return
+	}
+	response := refreshResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		TokenType:    "bearer",
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+// logoutRequest is the request body for POST /auth/logout
+type logoutRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+// HandleLogout handles POST /auth/logout
+func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req logoutRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.RefreshToken = strings.TrimSpace(req.RefreshToken)
+	if req.RefreshToken == "" {
+		respondWithError(w, http.StatusBadRequest, "refresh_token is required")
+		return
+	}
+	if err := h.authService.Logout(r.Context(), req.RefreshToken); err != nil {
+		respondWithError(w, http.StatusUnauthorized, "invalid or expired refresh token")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"message": "logged out"})
 }
 
 // HandleMe handles GET /me (protected). Returns the authenticated user.

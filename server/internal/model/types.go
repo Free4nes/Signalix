@@ -36,3 +36,14 @@ type OtpSession struct {
 	RequestIP     *string
 	UserAgent     *string
 }
+
+// RefreshSession represents a refresh token session
+type RefreshSession struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	TokenHash string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	RevokedAt *time.Time
+	ReplacedBy *uuid.UUID
+}

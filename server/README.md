@@ -23,16 +23,15 @@ Die API benötigt folgende Variablen. Du kannst sie in PowerShell setzen oder ei
 ### DATABASE_URL (wichtig)
 
 - **Format:** `postgres://BENUTZER:PASSWORT@HOST:PORT/DBNAME?sslmode=disable`
-- **Beispiel mit echtem Passwort** (ersetze nur das Passwort durch deins):
+- **Beispiel:**
   ```text
-  postgres://postgres:rikykitkat100@localhost:5432/messenger?sslmode=disable
+  postgres://postgres:Ricardo-Leticia100@127.0.0.1:5432/messenger?sslmode=disable
   ```
-  Ersetze `rikykitkat100` durch dein tatsächliches PostgreSQL-Passwort. **Keine Platzhalter wie `<DEINPASSWORT>` verwenden** – sie führen zu „invalid userinfo“-Fehlern.
 - **Sonderzeichen im Passwort:** Wenn das Passwort Zeichen wie `@`, `:`, `/`, `#`, `%` enthält, musst du sie URL-kodieren (percent-encoding), z. B. `@` → `%40`, `:` → `%3A`, `/` → `%2F`, `#` → `%23`, `%` → `%25`. Sonst wird der Connection-String ungültig.
 
 ### Optional: .env-Datei
 
-Im Verzeichnis `server/` kannst du eine Datei `.env` anlegen. **Vorlage:** Datei `server/.env.example` nach `server/.env` kopieren und Werte anpassen (insbesondere `YOUR_PASSWORD` in `DATABASE_URL` ersetzen). Beim Start lädt die API `.env` automatisch (`godotenv`); bereits gesetzte Umgebungsvariablen haben Vorrang. Ohne `.env` müssen alle Werte in der Shell gesetzt werden.
+Im Verzeichnis `server/` kannst du eine Datei `.env` anlegen. **Vorlage:** `server/.env.example` nach `server/.env` kopieren (Passwort bereits gesetzt). Beim Start lädt die API `.env` automatisch (`godotenv`); bereits gesetzte Umgebungsvariablen haben Vorrang. Ohne `.env` müssen alle Werte in der Shell gesetzt werden.
 
 ## Installation
 
@@ -55,7 +54,7 @@ Alle Befehle **einzeln** ausführen, keine Zeilenumbrüche in der Mitte eines Be
 
 ```powershell
 cd server
-$env:DATABASE_URL = "postgres://postgres:rikykitkat100@localhost:5432/messenger?sslmode=disable"
+$env:DATABASE_URL = "postgres://postgres:Ricardo-Leticia100@127.0.0.1:5432/messenger?sslmode=disable"
 $env:JWT_SECRET = "your-secret-key-at-least-32-characters-long"
 $env:OTP_SALT = "your-otp-salt"
 $env:OTP_DEV_MODE = "true"
@@ -261,50 +260,50 @@ go test ./... -v
 - **Unit tests** (e.g. `internal/auth`) run without a database.
 - **Integration tests** (`internal/tests`) use a **real PostgreSQL** database. If `DATABASE_URL` is not set, they are **skipped** with a clear message so `go test ./...` still passes.
 
-#### How to run integration tests (full auth flow E2E)
+#### How to run integration and E2E tests
 
 1. **Create a test database** (do not use production):
 
    ```bash
-   # PostgreSQL: create a dedicated test DB
-   createdb signalix_test
+   # PostgreSQL: create dedicated test DB (required for TestAuthIntegration, TestAuthE2E)
+   createdb messenger_test
    ```
 
-2. **Set DATABASE_URL** to your test DB (empfohlen: `127.0.0.1` statt `localhost` wegen IPv6/psql):
+2. **Set DATABASE_URL** to your test DB (`127.0.0.1` recommended instead of `localhost`):
 
    ```bash
    # Linux/macOS
-   export DATABASE_URL="postgres://postgres:YOUR_PASSWORD@127.0.0.1:5432/signalix_test?sslmode=disable"
+   export DATABASE_URL="postgres://postgres:Ricardo-Leticia100@127.0.0.1:5432/messenger_test?sslmode=disable"
    ```
 
    ```powershell
    # Windows PowerShell (einzeilig)
-   $env:DATABASE_URL = "postgres://postgres:YOUR_PASSWORD@127.0.0.1:5432/signalix_test?sslmode=disable"
+   $env:DATABASE_URL = "postgres://postgres:Ricardo-Leticia100@127.0.0.1:5432/messenger_test?sslmode=disable"
    ```
 
-   Replace `YOUR_PASSWORD` with your PostgreSQL password. Use a URL-encoded password if it contains special characters.
+   Use percent-encoding for special characters in password (`@`, `:`, `/`, `#`, `%`).
 
-3. **Integration-Tests ausführen:**
+3. **Integration- und E2E-Tests ausführen:**
 
    ```bash
    cd server
    make test-integration
    ```
 
-   Oder direkt mit `go test`:
+   Oder direkt mit `go test` (führt `TestAuthIntegration` und `TestAuthE2E` aus):
 
    ```bash
-   go test ./internal/tests/... -v -run TestAuthIntegration
+   go test ./internal/tests/... -v
    ```
 
    **Windows PowerShell** (aus dem Ordner `server`):
    ```powershell
    cd server
-   go test ./internal/tests/... -v -run TestAuthIntegration
+   go test ./internal/tests/... -v
    ```
-   Ohne gesetztes `DATABASE_URL` werden die Integrationstests übersprungen; `go test ./... -v` läuft trotzdem durch (nur Unit-Tests).
+   Ohne gesetztes `DATABASE_URL` werden die Integration/E2E-Tests übersprungen; `go test ./... -v` läuft trotzdem durch (nur Unit-Tests).
 
-Integration tests start an in-process server (`httptest`), run migrations on the test DB, truncate auth tables between subtests, and verify: health, request_otp (with `dev_otp`), verify_otp (`access_token`), GET /me (Bearer token), invalid OTP (401), and rate limit (429 on 4th request).
+Integration and E2E tests use an in-process server (`httptest`), run migrations on the test DB, truncate auth tables between subtests, and verify: health, request_otp (with `dev_otp`), verify_otp (`access_token`), GET /me (Bearer token), invalid OTP (401), rate limit (429 on 4th request), and production mode (no `dev_otp`).
 
 ## Nächste Schritte
 

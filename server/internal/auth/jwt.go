@@ -10,26 +10,31 @@ import (
 
 const (
 	tokenExpiry       = 7 * 24 * time.Hour  // 7 days (device tokens)
-	accessTokenExpiry = 24 * time.Hour      // 24h (access tokens)
+	accessTokenExpiry = 15 * time.Minute    // default 15m (access tokens)
 )
 
 // JWTClaims represents the JWT token claims (supports both device and access tokens)
 type JWTClaims struct {
-	UserID     uuid.UUID `json:"sub"`
-	PhoneNumber string   `json:"phone_number,omitempty"`
-	DeviceID   uuid.UUID `json:"device_id,omitempty"`
+	UserID      uuid.UUID `json:"sub"`
+	PhoneNumber string    `json:"phone_number,omitempty"`
+	DeviceID    uuid.UUID `json:"device_id,omitempty"`
 	jwt.RegisteredClaims
 }
 
 // JWTService handles JWT token operations
 type JWTService struct {
-	secret []byte
+	secret           []byte
+	accessTokenTTL   time.Duration
 }
 
 // NewJWTService creates a new JWT service
-func NewJWTService(secret string) *JWTService {
+func NewJWTService(secret string, accessTokenTTL time.Duration) *JWTService {
+	if accessTokenTTL <= 0 {
+		accessTokenTTL = accessTokenExpiry
+	}
 	return &JWTService{
-		secret: []byte(secret),
+		secret:         []byte(secret),
+		accessTokenTTL: accessTokenTTL,
 	}
 }
 
@@ -54,15 +59,19 @@ func (s *JWTService) SignToken(userID, deviceID uuid.UUID) (string, error) {
 	return tokenString, nil
 }
 
-// SignAccessToken creates a JWT access token with user_id and phone_number (24h expiry)
+// SignAccessToken creates a JWT access token with user_id and phone_number
 func (s *JWTService) SignAccessToken(userID uuid.UUID, phoneNumber string) (string, error) {
 	now := time.Now()
+	ttl := s.accessTokenTTL
+	if ttl <= 0 {
+		ttl = accessTokenExpiry
+	}
 	claims := &JWTClaims{
 		UserID:     userID,
 		PhoneNumber: phoneNumber,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(accessTokenExpiry)),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 		},
 	}
 

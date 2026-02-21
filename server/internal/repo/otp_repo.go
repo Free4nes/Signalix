@@ -29,7 +29,8 @@ func NewOtpRepo(db *sql.DB) OtpRepo {
 	return &otpRepo{db: db}
 }
 
-// CreateOrReplaceSession ensures only one active session per phone: consumes any existing active session, then inserts a new one.
+// CreateOrReplaceSession ensures only one active session per phone: atomically invalidates any existing
+// session (consumed_at IS NULL) and inserts a new one. Uses advisory lock for race safety.
 func (r *otpRepo) CreateOrReplaceSession(ctx context.Context, phone, otpHashHex string, expiresAt time.Time, requestIP, userAgent *string) (uuid.UUID, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -37,11 +38,19 @@ func (r *otpRepo) CreateOrReplaceSession(ctx context.Context, phone, otpHashHex 
 	}
 	defer tx.Rollback()
 
-	// Consume any existing active session for this phone
+	// Advisory lock: serialize requests per phone to avoid duplicate key on INSERT.
+	// Blocks until we hold the lock; released on COMMIT/ROLLBACK.
+	_, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(1, hashtext($1))`, phone)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("advisory lock: %w", err)
+	}
+
+	// Invalidate any existing active session (unique index: phone WHERE consumed_at IS NULL).
+	// Must consume ALL such rows, including expired ones.
 	_, err = tx.ExecContext(ctx, `
 		UPDATE otp_sessions
 		SET consumed_at = now()
-		WHERE phone_number = $1 AND consumed_at IS NULL AND expires_at > now()
+		WHERE phone_number = $1 AND consumed_at IS NULL
 	`, phone)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("consume existing sessions: %w", err)

@@ -5,16 +5,20 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Config holds the application configuration
 type Config struct {
-	DatabaseURL string
-	Port        string
-	JWTSecret   string
-	OTPSalt     string
-	DevMode     bool
+	DatabaseURL     string
+	Port            string
+	JWTSecret       string
+	OTPSalt         string
+	DevMode         bool
+	AccessTokenTTL  time.Duration // default 15m
+	RefreshTokenTTL time.Duration // default 720h (30 days)
 }
 
 // Load reads configuration from environment variables
@@ -72,6 +76,26 @@ func Load() (*Config, error) {
 	// Load DEV_MODE (optional, defaults to false)
 	devMode := os.Getenv("DEV_MODE")
 	cfg.DevMode = devMode == "true"
+
+	// Load ACCESS_TOKEN_TTL (optional, default 15m)
+	cfg.AccessTokenTTL = 15 * time.Minute
+	if v := os.Getenv("ACCESS_TOKEN_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.AccessTokenTTL = d
+		}
+	}
+
+	// Load REFRESH_TOKEN_TTL (optional, default 720h)
+	cfg.RefreshTokenTTL = 720 * time.Hour
+	if v := os.Getenv("REFRESH_TOKEN_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.RefreshTokenTTL = d
+		}
+	} else if v := os.Getenv("REFRESH_TOKEN_TTL_HOURS"); v != "" {
+		if h, err := strconv.Atoi(v); err == nil && h > 0 {
+			cfg.RefreshTokenTTL = time.Duration(h) * time.Hour
+		}
+	}
 
 	return cfg, nil
 }

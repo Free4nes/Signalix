@@ -53,11 +53,12 @@ func main() {
 	userRepo := repo.NewUserRepo(database)
 	deviceRepo := repo.NewDeviceRepo(database)
 	otpRepo := repo.NewOtpRepo(database)
+	refreshRepo := repo.NewRefreshRepo(database)
 
 	// Initialize auth services
 	otpProvider := auth.NewOtpStub(otpRepo, cfg.OTPSalt)
-	jwtService := auth.NewJWTService(cfg.JWTSecret)
-	authService := auth.NewAuthService(otpProvider, jwtService, userRepo, deviceRepo)
+	jwtService := auth.NewJWTService(cfg.JWTSecret, cfg.AccessTokenTTL)
+	authService := auth.NewAuthService(otpProvider, jwtService, userRepo, deviceRepo, refreshRepo, cfg.RefreshTokenTTL)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService, otpProvider)

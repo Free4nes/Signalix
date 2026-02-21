@@ -25,7 +25,7 @@ OTP-based authentication API in Go (PostgreSQL, CI-tested, Docker-ready).
 **PowerShell (Windows):**
 ```powershell
 cd server
-$env:DATABASE_URL = "postgres://postgres:DEIN_PASSWORT@127.0.0.1:5432/messenger?sslmode=disable"
+$env:DATABASE_URL = "postgres://postgres:Ricardo-Leticia100@127.0.0.1:5432/messenger?sslmode=disable"
 $env:JWT_SECRET = "your-secret-at-least-32-characters-long"
 $env:OTP_SALT = "your-otp-salt"
 $env:OTP_DEV_MODE = "true"
@@ -35,7 +35,7 @@ go run ./cmd/api
 **Linux / macOS:**
 ```bash
 cd server
-export DATABASE_URL="postgres://postgres:DEIN_PASSWORT@127.0.0.1:5432/messenger?sslmode=disable"
+export DATABASE_URL="postgres://postgres:Ricardo-Leticia100@127.0.0.1:5432/messenger?sslmode=disable"
 export JWT_SECRET="your-secret-at-least-32-characters-long"
 export OTP_SALT="your-otp-salt"
 export OTP_DEV_MODE="true"
@@ -49,14 +49,14 @@ See [server/.env.example](server/.env.example). Create `messenger` (or `messenge
 **PowerShell:**
 ```powershell
 cd server
-$env:DATABASE_URL = "postgres://postgres:DEIN_PASSWORT@127.0.0.1:5432/messenger_test?sslmode=disable"
+$env:DATABASE_URL = "postgres://postgres:Ricardo-Leticia100@127.0.0.1:5432/messenger_test?sslmode=disable"
 go test ./... -v
 ```
 
 **Linux / macOS:**
 ```bash
 cd server
-export DATABASE_URL="postgres://postgres:DEIN_PASSWORT@127.0.0.1:5432/messenger_test?sslmode=disable"
+export DATABASE_URL="postgres://postgres:Ricardo-Leticia100@127.0.0.1:5432/messenger_test?sslmode=disable"
 go test ./... -v
 ```
 

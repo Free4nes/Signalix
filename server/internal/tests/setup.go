@@ -51,7 +51,7 @@ func RunMigrations(db *sql.DB) error {
 
 // TruncateAuthTables truncates auth-related tables for a clean test state.
 func TruncateAuthTables(ctx context.Context, db *sql.DB) error {
-	_, err := db.ExecContext(ctx, "TRUNCATE TABLE devices, otp_sessions, users RESTART IDENTITY CASCADE")
+	_, err := db.ExecContext(ctx, "TRUNCATE TABLE refresh_sessions, devices, otp_sessions, users RESTART IDENTITY CASCADE")
 	if err != nil {
 		return fmt.Errorf("truncate auth tables: %w", err)
 	}

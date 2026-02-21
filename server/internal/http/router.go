@@ -24,6 +24,8 @@ func NewRouter(authHandler *handlers.AuthHandler, jwtService *auth.JWTService, u
 	r.Route("/auth", func(r chi.Router) {
 		r.Post("/request_otp", authHandler.HandleRequestOTP)
 		r.Post("/verify_otp", authHandler.HandleVerifyOTP)
+		r.Post("/refresh", authHandler.HandleRefresh)
+		r.Post("/logout", authHandler.HandleLogout)
 	})
 
 	// Protected routes (require valid JWT)
