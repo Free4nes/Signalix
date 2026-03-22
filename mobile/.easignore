@@ -1,0 +1,16 @@
+# Large caches and build artifacts (prevent ENOSPC on EAS upload)
+node_modules/
+.expo/
+.expo-shared/
+dist/
+build/
+.cache
+.gradle
+android/
+ios/
+android/.gradle
+android/build
+android/app/build
+ios/build
+*.log
+*.tmp

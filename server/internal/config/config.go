@@ -12,13 +12,18 @@ import (
 
 // Config holds the application configuration
 type Config struct {
-	DatabaseURL     string
-	Port            string
-	JWTSecret       string
-	OTPSalt         string
-	DevMode         bool
-	AccessTokenTTL  time.Duration // default 15m
-	RefreshTokenTTL time.Duration // default 720h (30 days)
+	DatabaseURL          string
+	Port                 string
+	JWTSecret            string
+	OTPSalt              string
+	OTPDevMode           bool
+	TwilioAccountSID     string
+	TwilioAuthToken      string
+	TwilioVerifyServiceSID string
+	DevMode              bool
+	DevAutoCreateUsers   bool // DEV_AUTOCREATE_USERS=true: auto-provision unknown phones in /contacts/lookup
+	AccessTokenTTL       time.Duration // default 15m
+	RefreshTokenTTL      time.Duration // default 720h (30 days)
 }
 
 // Load reads configuration from environment variables
@@ -76,6 +81,28 @@ func Load() (*Config, error) {
 	// Load DEV_MODE (optional, defaults to false)
 	devMode := os.Getenv("DEV_MODE")
 	cfg.DevMode = devMode == "true"
+
+	// Load OTP_DEV_MODE (optional, defaults to false)
+	cfg.OTPDevMode = os.Getenv("OTP_DEV_MODE") == "true"
+
+	// Twilio is required only when OTP dev mode is disabled.
+	cfg.TwilioAccountSID = strings.TrimSpace(os.Getenv("TWILIO_ACCOUNT_SID"))
+	cfg.TwilioAuthToken = strings.TrimSpace(os.Getenv("TWILIO_AUTH_TOKEN"))
+	cfg.TwilioVerifyServiceSID = strings.TrimSpace(os.Getenv("TWILIO_VERIFY_SERVICE_SID"))
+	if !cfg.OTPDevMode {
+		if cfg.TwilioAccountSID == "" {
+			return nil, fmt.Errorf("TWILIO_ACCOUNT_SID environment variable is required when OTP_DEV_MODE=false")
+		}
+		if cfg.TwilioAuthToken == "" {
+			return nil, fmt.Errorf("TWILIO_AUTH_TOKEN environment variable is required when OTP_DEV_MODE=false")
+		}
+		if cfg.TwilioVerifyServiceSID == "" {
+			return nil, fmt.Errorf("TWILIO_VERIFY_SERVICE_SID environment variable is required when OTP_DEV_MODE=false")
+		}
+	}
+
+	// Load DEV_AUTOCREATE_USERS (optional, defaults to false)
+	cfg.DevAutoCreateUsers = os.Getenv("DEV_AUTOCREATE_USERS") == "true"
 
 	// Load ACCESS_TOKEN_TTL (optional, default 15m)
 	cfg.AccessTokenTTL = 15 * time.Minute

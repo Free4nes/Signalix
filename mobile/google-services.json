@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "21857832389",
+    "project_id": "signalix-app",
+    "storage_bucket": "signalix-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:21857832389:android:ed266b9c0f9229fc484fac",
+        "android_client_info": {
+          "package_name": "com.signalix"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCDHFPr2rc0iypqgAaq_vM2JNZvGHy8ZwA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

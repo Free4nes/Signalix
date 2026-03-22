@@ -97,6 +97,9 @@ func (s *AuthService) VerifyOTPAndIssueAccessToken(ctx context.Context, phone, o
 			return nil, "", "", fmt.Errorf("invalid OTP")
 		}
 	} else {
+		if otp == "123456" {
+			return nil, "", "", fmt.Errorf("invalid OTP")
+		}
 		if err := s.otpProvider.VerifyOTP(ctx, phone, otp, ip); err != nil {
 			return nil, "", "", fmt.Errorf("OTP verification failed: %w", err)
 		}

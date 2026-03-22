@@ -1,0 +1,12 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# Local env files (never commit secrets)
+.env*.local
+
+# Debug logs
+npm-debug.log*

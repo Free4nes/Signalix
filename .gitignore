@@ -1,6 +1,7 @@
 # Binaries & builds
 bin/
 dist/
+build/
 *.exe
 *.dll
 *.so
@@ -15,8 +16,10 @@ dist/
 
 # Logs & temp
 *.log
+*.tmp
 tmp/
 temp/
+.cache
 
 # Test coverage
 coverage.out
@@ -31,3 +34,21 @@ coverage.html
 
 # Go
 /vendor/
+
+# Node / Expo / mobile build caches (EAS upload safety)
+node_modules/
+.expo/
+.expo-shared/
+.gradle
+**/.gradle
+android/.gradle
+android/build
+android/app/build
+ios/build
+**/build
+dist/
+coverage/
+*.log
+tmp/
+temp/
+.vscode/

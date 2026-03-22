@@ -3,9 +3,12 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"strings"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/signalix/server/internal/auth"
 	"github.com/signalix/server/internal/model"
@@ -44,6 +47,7 @@ func AuthMiddleware(jwtService *auth.JWTService, userRepo repo.UserRepo) func(ht
 
 			claims, err := jwtService.VerifyToken(tokenString)
 			if err != nil {
+				logTokenFailureReason(err)
 				respondWithError(w, http.StatusUnauthorized, "invalid or expired token")
 				return
 			}
@@ -89,4 +93,29 @@ func respondWithError(w http.ResponseWriter, statusCode int, message string) {
 	w.WriteHeader(statusCode)
 	response := map[string]string{"error": message}
 	_ = json.NewEncoder(w).Encode(response)
+}
+
+// logTokenFailureReason logs the specific JWT failure reason (expired, signature, missing claim, etc.)
+// without logging the token value.
+func logTokenFailureReason(err error) {
+	reason := "unknown"
+	switch {
+	case errors.Is(err, jwt.ErrTokenExpired):
+		reason = "expired"
+	case errors.Is(err, jwt.ErrTokenSignatureInvalid):
+		reason = "signature_invalid"
+	case errors.Is(err, jwt.ErrTokenRequiredClaimMissing):
+		reason = "missing_required_claim"
+	case errors.Is(err, jwt.ErrTokenMalformed):
+		reason = "malformed"
+	case errors.Is(err, jwt.ErrTokenNotValidYet):
+		reason = "not_valid_yet"
+	case errors.Is(err, jwt.ErrTokenInvalidClaims):
+		reason = "invalid_claims"
+	case errors.Is(err, jwt.ErrTokenUnverifiable):
+		reason = "unverifiable"
+	default:
+		reason = "other: " + err.Error()
+	}
+	log.Printf("auth: token validation failed: %s", reason)
 }

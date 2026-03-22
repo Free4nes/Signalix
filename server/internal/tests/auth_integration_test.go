@@ -6,25 +6,34 @@ import (
 	"database/sql"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/signalix/server/internal/auth"
+	"github.com/signalix/server/internal/chat"
 	"github.com/signalix/server/internal/config"
 	"github.com/signalix/server/internal/db"
 	httphandler "github.com/signalix/server/internal/http"
 	"github.com/signalix/server/internal/http/handlers"
+	"github.com/signalix/server/internal/ingest"
+	"github.com/signalix/server/internal/project"
+	"github.com/signalix/server/internal/ratelimit"
 	"github.com/signalix/server/internal/repo"
+	"github.com/signalix/server/internal/ws"
 	_ "github.com/lib/pq"
 )
 
 func TestMain(m *testing.M) {
-	// Set env if unset. Do NOT set DATABASE_URL; integration tests skip if missing.
+	if os.Getenv("DATABASE_URL") == "" {
+		os.Setenv("DATABASE_URL", ResolveDatabaseURL())
+	}
 	if os.Getenv("JWT_SECRET") == "" {
 		os.Setenv("JWT_SECRET", "test-jwt-secret-at-least-32-characters-long")
 	}
@@ -41,8 +50,10 @@ func TestMain(m *testing.M) {
 
 // testServer holds the server and DB for integration tests
 type testServer struct {
-	Server *httptest.Server
-	DB     *sql.DB
+	Server      *httptest.Server
+	DB          *sql.DB
+	ProjectSvc  *project.Service
+	ChatSvc     *chat.Service
 }
 
 func newTestServer(t *testing.T) *testServer {
@@ -51,9 +62,12 @@ func newTestServer(t *testing.T) *testServer {
 	cfg, err := config.Load()
 	require.NoError(t, err, "config load must succeed for integration test")
 
+	masked := maskDSN(cfg.DatabaseURL)
+	log.Printf("Using DATABASE_URL=%s", masked)
+
 	ctx := context.Background()
 	database, err := db.Open(ctx, cfg.DatabaseURL)
-	require.NoError(t, err, "database open must succeed; check DATABASE_URL and that test DB exists")
+	require.NoError(t, err, "database not reachable; ensure Postgres is running (docker-compose up -d db) and credentials match docker-compose.yml")
 	t.Cleanup(func() { database.Close() })
 
 	err = RunMigrations(database)
@@ -63,17 +77,101 @@ func newTestServer(t *testing.T) *testServer {
 	deviceRepo := repo.NewDeviceRepo(database)
 	otpRepo := repo.NewOtpRepo(database)
 	refreshRepo := repo.NewRefreshRepo(database)
+	projectRepo := repo.NewProjectRepo(database)
+	projectKeyRepo := repo.NewProjectKeyRepo(database)
+	projectEventRepo := repo.NewProjectEventRepo(database)
+	eventRepo := repo.NewEventRepo(database)
+	conversationRepo := repo.NewConversationRepo(database, userRepo)
+	messageRepo := repo.NewMessageRepo(database)
 
 	otpProvider := auth.NewOtpStub(otpRepo, cfg.OTPSalt)
 	jwtService := auth.NewJWTService(cfg.JWTSecret, cfg.AccessTokenTTL)
 	authService := auth.NewAuthService(otpProvider, jwtService, userRepo, deviceRepo, refreshRepo, cfg.RefreshTokenTTL)
-	authHandler := handlers.NewAuthHandler(authService, otpProvider)
 
-	router := httphandler.NewRouter(authHandler, jwtService, userRepo)
+	pushTokenRepo := repo.NewPushTokenRepo(database)
+	reactionRepo := repo.NewReactionRepo(database)
+	blockedRepo := repo.NewBlockedRepo(database)
+	authHandler := handlers.NewAuthHandler(authService, otpProvider, userRepo, pushTokenRepo)
+	projectSvc := project.NewService(database, projectRepo, projectKeyRepo, conversationRepo, projectEventRepo)
+	projectHandler := handlers.NewProjectHandler(projectSvc)
+	ingestSvc := ingest.NewService(eventRepo)
+	ingestHandler := handlers.NewIngestHandler(ingestSvc)
+	eventsHandler := handlers.NewEventsHandler(eventRepo, projectRepo)
+	chatSvc := chat.NewService(database, userRepo, conversationRepo, messageRepo, projectRepo, projectEventRepo, reactionRepo)
+	hub := ws.NewHub()
+	msgLimiter := ratelimit.NewMessageLimiter(20, 10*time.Second)
+	chatHandler := handlers.NewChatHandler(chatSvc, hub, conversationRepo, pushTokenRepo, userRepo, reactionRepo, blockedRepo, msgLimiter)
+	userHandler := handlers.NewUserHandler(blockedRepo)
+	wsHandler := handlers.NewWsHandler(hub, jwtService, userRepo, conversationRepo, chatSvc)
+	contactsHandler := handlers.NewContactsHandler(userRepo, true)
+
+	router := httphandler.NewRouter(authHandler, projectHandler, chatHandler, wsHandler, contactsHandler, ingestHandler, eventsHandler, userHandler, projectSvc, jwtService, userRepo)
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 
-	return &testServer{Server: server, DB: database}
+	return &testServer{Server: server, DB: database, ProjectSvc: projectSvc, ChatSvc: chatSvc}
+}
+
+// newTestServerForRestart creates a test server without registering t.Cleanup.
+// Caller must call the returned close function when done. Use for tests that need
+// two independent server instances (e.g., restart simulation with same DB).
+func newTestServerForRestart(t *testing.T) (*testServer, func()) {
+	t.Helper()
+
+	cfg, err := config.Load()
+	require.NoError(t, err, "config load must succeed for integration test")
+
+	masked := maskDSN(cfg.DatabaseURL)
+	log.Printf("Using DATABASE_URL=%s", masked)
+
+	ctx := context.Background()
+	database, err := db.Open(ctx, cfg.DatabaseURL)
+	require.NoError(t, err, "database not reachable; ensure Postgres is running (docker-compose up -d db) and credentials match docker-compose.yml")
+
+	err = RunMigrations(database)
+	require.NoError(t, err, "migrations must run successfully")
+
+	userRepo := repo.NewUserRepo(database)
+	deviceRepo := repo.NewDeviceRepo(database)
+	otpRepo := repo.NewOtpRepo(database)
+	refreshRepo := repo.NewRefreshRepo(database)
+	projectRepo := repo.NewProjectRepo(database)
+	projectKeyRepo := repo.NewProjectKeyRepo(database)
+	projectEventRepo := repo.NewProjectEventRepo(database)
+	eventRepo := repo.NewEventRepo(database)
+	conversationRepo := repo.NewConversationRepo(database, userRepo)
+	messageRepo := repo.NewMessageRepo(database)
+
+	otpProvider := auth.NewOtpStub(otpRepo, cfg.OTPSalt)
+	jwtService := auth.NewJWTService(cfg.JWTSecret, cfg.AccessTokenTTL)
+	authService := auth.NewAuthService(otpProvider, jwtService, userRepo, deviceRepo, refreshRepo, cfg.RefreshTokenTTL)
+
+	pushTokenRepo := repo.NewPushTokenRepo(database)
+	reactionRepo := repo.NewReactionRepo(database)
+	blockedRepo := repo.NewBlockedRepo(database)
+	authHandler := handlers.NewAuthHandler(authService, otpProvider, userRepo, pushTokenRepo)
+	projectSvc := project.NewService(database, projectRepo, projectKeyRepo, conversationRepo, projectEventRepo)
+	projectHandler := handlers.NewProjectHandler(projectSvc)
+	ingestSvc := ingest.NewService(eventRepo)
+	ingestHandler := handlers.NewIngestHandler(ingestSvc)
+	eventsHandler := handlers.NewEventsHandler(eventRepo, projectRepo)
+	chatSvc := chat.NewService(database, userRepo, conversationRepo, messageRepo, projectRepo, projectEventRepo, reactionRepo)
+	hub := ws.NewHub()
+	msgLimiter := ratelimit.NewMessageLimiter(20, 10*time.Second)
+	chatHandler := handlers.NewChatHandler(chatSvc, hub, conversationRepo, pushTokenRepo, userRepo, reactionRepo, blockedRepo, msgLimiter)
+	userHandler := handlers.NewUserHandler(blockedRepo)
+	wsHandler := handlers.NewWsHandler(hub, jwtService, userRepo, conversationRepo, chatSvc)
+	contactsHandler := handlers.NewContactsHandler(userRepo, true)
+
+	router := httphandler.NewRouter(authHandler, projectHandler, chatHandler, wsHandler, contactsHandler, ingestHandler, eventsHandler, userHandler, projectSvc, jwtService, userRepo)
+	server := httptest.NewServer(router)
+
+	ts := &testServer{Server: server, DB: database, ProjectSvc: projectSvc, ChatSvc: chatSvc}
+	closeFn := func() {
+		server.Close()
+		database.Close()
+	}
+	return ts, closeFn
 }
 
 func (s *testServer) BaseURL() string { return s.Server.URL }
@@ -111,6 +209,7 @@ type refreshResponse struct {
 type meResponse struct {
 	ID          string `json:"id"`
 	PhoneNumber string `json:"phone_number"`
+	DisplayName string `json:"display_name"`
 }
 
 // errorResponse matches error JSON body
@@ -230,9 +329,10 @@ func TestAuthIntegration(t *testing.T) {
 		respRefresh, err := client.Post(baseURL+"/auth/refresh", "application/json", bytes.NewReader(refreshBytes))
 		require.NoError(t, err)
 		defer respRefresh.Body.Close()
-		assert.Equal(t, http.StatusOK, respRefresh.StatusCode, "POST /auth/refresh must return 200; body: %s", readBody(respRefresh))
+		refreshBody := readBody(respRefresh)
+		assert.Equal(t, http.StatusOK, respRefresh.StatusCode, "POST /auth/refresh must return 200; body: %s", refreshBody)
 		var refreshRes refreshResponse
-		require.NoError(t, json.NewDecoder(respRefresh.Body).Decode(&refreshRes))
+		require.NoError(t, json.Unmarshal([]byte(refreshBody), &refreshRes))
 		assert.NotEmpty(t, refreshRes.AccessToken)
 		assert.NotEmpty(t, refreshRes.RefreshToken)
 		assert.Equal(t, "bearer", refreshRes.TokenType)
@@ -392,6 +492,64 @@ func TestAuthIntegration(t *testing.T) {
 		defer lastResp.Body.Close()
 		rateLimitBody := readBody(lastResp)
 		assert.Equal(t, http.StatusTooManyRequests, lastResp.StatusCode, "4th request_otp must return 429 (rate limit); body: %s", rateLimitBody)
+	})
+
+	t.Run("G_PatchMe_DisplayName", func(t *testing.T) {
+		ts.TruncateAuth(t)
+		token := loginAndGetToken(t, client, baseURL, "+491234567890")
+
+		// PATCH set display_name
+		patchBody, _ := json.Marshal(map[string]string{"display_name": "Ricardo"})
+		patchReq, _ := http.NewRequest(http.MethodPatch, baseURL+"/me", bytes.NewReader(patchBody))
+		patchReq.Header.Set("Authorization", "Bearer "+token)
+		patchReq.Header.Set("Content-Type", "application/json")
+		patchResp, err := client.Do(patchReq)
+		require.NoError(t, err)
+		defer patchResp.Body.Close()
+		assert.Equal(t, http.StatusOK, patchResp.StatusCode)
+		var patchRes meResponse
+		require.NoError(t, json.NewDecoder(patchResp.Body).Decode(&patchRes))
+		assert.Equal(t, "Ricardo", patchRes.DisplayName)
+		assert.Equal(t, "+491234567890", patchRes.PhoneNumber)
+
+		// GET /me contains display_name
+		getReq, _ := http.NewRequest(http.MethodGet, baseURL+"/me", nil)
+		getReq.Header.Set("Authorization", "Bearer "+token)
+		getResp, err := client.Do(getReq)
+		require.NoError(t, err)
+		defer getResp.Body.Close()
+		var getRes meResponse
+		require.NoError(t, json.NewDecoder(getResp.Body).Decode(&getRes))
+		assert.Equal(t, "Ricardo", getRes.DisplayName)
+
+		// PATCH with empty string sets NULL
+		patchBody2, _ := json.Marshal(map[string]string{"display_name": ""})
+		patchReq2, _ := http.NewRequest(http.MethodPatch, baseURL+"/me", bytes.NewReader(patchBody2))
+		patchReq2.Header.Set("Authorization", "Bearer "+token)
+		patchReq2.Header.Set("Content-Type", "application/json")
+		patchResp2, err := client.Do(patchReq2)
+		require.NoError(t, err)
+		defer patchResp2.Body.Close()
+		assert.Equal(t, http.StatusOK, patchResp2.StatusCode)
+		var patchRes2 meResponse
+		require.NoError(t, json.NewDecoder(patchResp2.Body).Decode(&patchRes2))
+		assert.Empty(t, patchRes2.DisplayName)
+
+		// PATCH with whitespace also sets NULL
+		patchBody3, _ := json.Marshal(map[string]string{"display_name": "   "})
+		patchReq3, _ := http.NewRequest(http.MethodPatch, baseURL+"/me", bytes.NewReader(patchBody3))
+		patchReq3.Header.Set("Authorization", "Bearer "+token)
+		patchReq3.Header.Set("Content-Type", "application/json")
+		_, err = client.Do(patchReq3)
+		require.NoError(t, err)
+		getReq2, _ := http.NewRequest(http.MethodGet, baseURL+"/me", nil)
+		getReq2.Header.Set("Authorization", "Bearer "+token)
+		getResp2, err := client.Do(getReq2)
+		require.NoError(t, err)
+		defer getResp2.Body.Close()
+		var getRes2 meResponse
+		require.NoError(t, json.NewDecoder(getResp2.Body).Decode(&getRes2))
+		assert.Empty(t, getRes2.DisplayName)
 	})
 }
 

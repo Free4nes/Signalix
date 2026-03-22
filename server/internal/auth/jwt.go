@@ -84,22 +84,24 @@ func (s *JWTService) SignAccessToken(userID uuid.UUID, phoneNumber string) (stri
 	return tokenString, nil
 }
 
-// VerifyToken verifies and parses a JWT token
+// VerifyToken verifies and parses a JWT token. Uses a 1-minute leeway for exp/nbf
+// to tolerate clock skew. Returns errors that support errors.Is with jwt package sentinels
+// (e.g. ErrTokenExpired, ErrTokenSignatureInvalid) for logging.
 func (s *JWTService) VerifyToken(tokenString string) (*JWTClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return s.secret, nil
-	})
+	}, jwt.WithLeeway(1*time.Minute))
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse token: %w", err)
+		return nil, err
 	}
 
 	claims, ok := token.Claims.(*JWTClaims)
 	if !ok || !token.Valid {
-		return nil, fmt.Errorf("invalid token")
+		return nil, jwt.ErrTokenInvalidClaims
 	}
 
 	return claims, nil

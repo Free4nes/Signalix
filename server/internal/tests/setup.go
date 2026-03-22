@@ -4,11 +4,37 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pressly/goose/v3"
 )
+
+// Default database URL matching docker-compose.yml:
+// POSTGRES_USER=postgres, POSTGRES_PASSWORD=postgres, POSTGRES_DB=messenger
+const defaultDBURL = "postgres://postgres:postgres@127.0.0.1:5432/messenger?sslmode=disable"
+
+// ResolveDatabaseURL returns DATABASE_URL from env if set; otherwise the default from docker-compose.
+func ResolveDatabaseURL() string {
+	if u := os.Getenv("DATABASE_URL"); u != "" {
+		return strings.TrimSpace(u)
+	}
+	return defaultDBURL
+}
+
+// maskDSN returns a DSN with password redacted for logging.
+func maskDSN(dsn string) string {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "(invalid)"
+	}
+	if u.User != nil {
+		u.User = url.UserPassword(u.User.Username(), "****")
+	}
+	return u.String()
+}
 
 const (
 	// MigrationDir is the path to migrations relative to module root (server/).
@@ -49,9 +75,9 @@ func RunMigrations(db *sql.DB) error {
 	return nil
 }
 
-// TruncateAuthTables truncates auth-related tables for a clean test state.
+// TruncateAuthTables truncates auth-related and chat tables for a clean test state.
 func TruncateAuthTables(ctx context.Context, db *sql.DB) error {
-	_, err := db.ExecContext(ctx, "TRUNCATE TABLE refresh_sessions, devices, otp_sessions, users RESTART IDENTITY CASCADE")
+	_, err := db.ExecContext(ctx, "TRUNCATE TABLE project_events, messages, conversation_members, conversations, events, project_api_keys, projects, refresh_sessions, devices, otp_sessions, users RESTART IDENTITY CASCADE")
 	if err != nil {
 		return fmt.Errorf("truncate auth tables: %w", err)
 	}
