@@ -215,6 +215,11 @@ func (r *conversationRepo) ListConversationsForUser(ctx context.Context, userID 
 				body_preview,
 				sent_at
 			FROM messages
+			WHERE NOT EXISTS (
+				SELECT 1
+				FROM message_hidden h
+				WHERE h.message_id = messages.id AND h.user_id = $1
+			)
 			ORDER BY conversation_id, sent_at DESC
 		)
 		SELECT c.id, c.created_at, c.is_group, c.title, c.project_id, p.name, lm.body_preview, lm.sent_at
@@ -356,6 +361,11 @@ func (r *conversationRepo) ListConversationsForUserByProject(ctx context.Context
 				body_preview,
 				sent_at
 			FROM messages
+			WHERE NOT EXISTS (
+				SELECT 1
+				FROM message_hidden h
+				WHERE h.message_id = messages.id AND h.user_id = $1
+			)
 			ORDER BY conversation_id, sent_at DESC
 		)
 		SELECT c.id, c.created_at, c.is_group, c.title, lm.body_preview, lm.sent_at

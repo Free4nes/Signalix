@@ -5,11 +5,14 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/signalix/server/internal/model"
+	"github.com/signalix/server/internal/phone"
 	"github.com/signalix/server/internal/repo"
 )
 
@@ -91,6 +94,37 @@ func (s *AuthService) VerifyOTPAndCreateSession(
 // VerifyOTPAndIssueAccessToken verifies OTP (with OTP_DEV_MODE support), gets or creates user,
 // returns JWT access token and refresh token.
 func (s *AuthService) VerifyOTPAndIssueAccessToken(ctx context.Context, phone, otp, ip string) (*model.User, string, string, error) {
+	if reviewHit, reviewCodeOK := isGoogleReviewLogin(phone, otp); reviewHit && reviewCodeOK {
+		log.Printf("GOOGLE_REVIEW verify_otp hit phone=%s", maskPhoneForReviewLog(phone))
+
+		_, getByPhoneErr := s.userRepo.GetByPhone(ctx, phone)
+		userExisted := getByPhoneErr == nil
+
+		user, err := s.userRepo.GetOrCreateByPhone(ctx, phone)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("failed to ensure review user: %w", err)
+		}
+
+		if userExisted {
+			log.Printf("GOOGLE_REVIEW user ensured user_id=%s phone=%s created=false", user.ID.String(), maskPhoneForReviewLog(phone))
+		} else {
+			log.Printf("GOOGLE_REVIEW user ensured user_id=%s phone=%s created=true", user.ID.String(), maskPhoneForReviewLog(phone))
+		}
+
+		accessToken, err := s.jwtService.SignAccessToken(user.ID, user.PhoneNumber)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("failed to generate access token: %w", err)
+		}
+
+		refreshToken, err := s.createRefreshSession(ctx, user.ID)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("failed to create refresh session: %w", err)
+		}
+
+		log.Printf("GOOGLE_REVIEW token issue success user_id=%s phone=%s", user.ID.String(), maskPhoneForReviewLog(phone))
+		return &user, accessToken, refreshToken, nil
+	}
+
 	// OTP_DEV_MODE: accept only "123456"
 	if os.Getenv("OTP_DEV_MODE") == "true" {
 		if otp != "123456" {
@@ -121,6 +155,36 @@ func (s *AuthService) VerifyOTPAndIssueAccessToken(ctx context.Context, phone, o
 	}
 
 	return &user, accessToken, refreshToken, nil
+}
+
+func isGoogleReviewLogin(normalizedPhone, submittedCode string) (reviewPhoneHit bool, reviewCodeMatch bool) {
+	if os.Getenv("GOOGLE_REVIEW_ACCESS_ENABLED") != "true" {
+		return false, false
+	}
+
+	reviewPhone := strings.TrimSpace(os.Getenv("GOOGLE_REVIEW_PHONE"))
+	reviewCode := strings.TrimSpace(os.Getenv("GOOGLE_REVIEW_CODE"))
+	if reviewPhone == "" || reviewCode == "" {
+		return false, false
+	}
+
+	normalizedReviewPhone, err := phone.Normalize(reviewPhone)
+	if err != nil {
+		return false, false
+	}
+
+	if normalizedPhone != normalizedReviewPhone {
+		return false, false
+	}
+
+	return true, submittedCode == reviewCode
+}
+
+func maskPhoneForReviewLog(phoneNumber string) string {
+	if len(phoneNumber) <= 4 {
+		return "****"
+	}
+	return phoneNumber[:2] + strings.Repeat("*", len(phoneNumber)-4) + phoneNumber[len(phoneNumber)-2:]
 }
 
 // createRefreshSession generates a refresh token, stores its hash, and returns the plain token

@@ -108,6 +108,17 @@ func (h *AuthHandler) HandleRequestOTP(w http.ResponseWriter, r *http.Request) {
 	}
 	req.PhoneNumber = normalized
 
+	if isGoogleReviewRequestOTPPhone(req.PhoneNumber) {
+		log.Printf("GOOGLE_REVIEW request_otp hit phone=%s", maskPhone(req.PhoneNumber))
+		response := requestOTPResponse{Message: "otp_sent"}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			logMaskedPhone(req.PhoneNumber, "Failed to encode response", err)
+		}
+		return
+	}
+
 	ipKey := middleware.GetIPKey(r)
 	if !h.ipLimiter.Allow(ipKey) {
 		respondWithError(w, http.StatusTooManyRequests, "rate limit exceeded")
@@ -534,4 +545,22 @@ func maskPhone(phone string) string {
 	suffix := phone[len(phone)-2:]
 	masked := strings.Repeat("*", len(phone)-4)
 	return prefix + masked + suffix
+}
+
+func isGoogleReviewRequestOTPPhone(normalizedPhone string) bool {
+	if os.Getenv("GOOGLE_REVIEW_ACCESS_ENABLED") != "true" {
+		return false
+	}
+
+	reviewPhone := strings.TrimSpace(os.Getenv("GOOGLE_REVIEW_PHONE"))
+	if reviewPhone == "" {
+		return false
+	}
+
+	normalizedReviewPhone, err := phone.Normalize(reviewPhone)
+	if err != nil {
+		return false
+	}
+
+	return normalizedPhone == normalizedReviewPhone
 }

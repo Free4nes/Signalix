@@ -4,12 +4,14 @@ import {
   Text,
   FlatList,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
   Modal,
   TextInput,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Alert,
 } from "react-native";
@@ -105,8 +107,14 @@ export default function ChatsScreen() {
   const [groupAddError, setGroupAddError] = useState<string | null>(null);
   const [contacts, setContacts] = useState<SyncUser[]>([]);
   const [groupCreating, setGroupCreating] = useState(false);
+  const openNewChatModal = useCallback(() => {
+    setNewPhone("");
+    setPhoneError(null);
+    setModalVisible(true);
+  }, []);
   const closeNewChatModal = useCallback(() => {
-    setModalVisible((prev) => (prev ? false : prev));
+    Keyboard.dismiss();
+    setModalVisible(false);
   }, []);
   const closeNewGroupModal = useCallback(() => {
     setGroupModalVisible((prev) => (prev ? false : prev));
@@ -140,12 +148,20 @@ export default function ChatsScreen() {
   // WebSocket: update chat list on message.created (unread, preview, move to top)
   useEffect(() => {
     const unsub = subscribe((event) => {
-      if (event.type !== "message.created" || !event.message) return;
       const convId = event.conversation_id;
+      if (!convId) return;
+
+      // Refresh list after delete/update to avoid stale preview/timestamp.
+      if (event.type === "message.deleted" || event.type === "message.updated") {
+        void load(true);
+        return;
+      }
+
+      if (event.type !== "message.created" || !event.message) return;
       const msg = event.message;
       const preview = msg.body_preview ?? "Message";
       const sentAt = msg.sent_at ?? new Date().toISOString();
-      const isActiveChat = String(convId ?? "").toLowerCase() === String(activeChatId ?? "").toLowerCase();
+      const isActiveChat = String(convId).toLowerCase() === String(activeChatId ?? "").toLowerCase();
       if (!isActiveChat) {
         incrementUnread(convId);
       }
@@ -172,7 +188,7 @@ export default function ChatsScreen() {
       });
     });
     return () => unsub();
-  }, [subscribe, activeChatId, incrementUnread]);
+  }, [subscribe, activeChatId, incrementUnread, load]);
 
   function onRefresh() {
     setRefreshing(true);
@@ -376,19 +392,21 @@ export default function ChatsScreen() {
         }}
       />
 
-      <TouchableOpacity
-        style={styles.fab}
-        activeOpacity={0.8}
-        onPress={() => {
-          Alert.alert("New conversation", "Choose an option", [
-            { text: "New Chat", onPress: () => { setNewPhone(""); setPhoneError(null); setModalVisible(true); } },
-            { text: "New Group", onPress: () => { setGroupName(""); setGroupMembers([]); setGroupAddPhone(""); setGroupAddError(null); setGroupModalVisible(true); loadContactsForGroup(); } },
-            { text: "Cancel", style: "cancel" },
-          ]);
-        }}
-      >
-        <Plus color="#fff" size={24} />
-      </TouchableOpacity>
+      {!modalVisible ? (
+        <TouchableOpacity
+          style={styles.fab}
+          activeOpacity={0.8}
+          onPress={() => {
+            Alert.alert("New conversation", "Choose an option", [
+              { text: "New Chat", onPress: openNewChatModal },
+              { text: "New Group", onPress: () => { setGroupName(""); setGroupMembers([]); setGroupAddPhone(""); setGroupAddError(null); setGroupModalVisible(true); loadContactsForGroup(); } },
+              { text: "Cancel", style: "cancel" },
+            ]);
+          }}
+        >
+          <Plus color="#fff" size={24} />
+        </TouchableOpacity>
+      ) : null}
 
       <Modal
         visible={modalVisible}
@@ -401,6 +419,7 @@ export default function ChatsScreen() {
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           keyboardVerticalOffset={0}
         >
+          <Pressable style={styles.modalBackdrop} onPress={() => {}} />
           <View style={styles.modalSheet}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>New Chat</Text>
@@ -647,6 +666,9 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "flex-end",
     backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
   },
   modalSheet: {
     backgroundColor: "#fff",
