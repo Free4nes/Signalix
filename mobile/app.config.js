@@ -25,7 +25,7 @@ const config = {
   },
   android: {
     package: "com.signalix",
-    versionCode: 17,
+    versionCode: 19,
     permissions: ["POST_NOTIFICATIONS"],
     googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? "./google-services.json",
     adaptiveIcon: {
